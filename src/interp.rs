@@ -1,46 +1,59 @@
+use std::borrow::BorrowMut;
 use std::io::{stdin, Stdin, stdout, Stdout, Write};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use preproc::Token;
 use Token::*;
 use crate::preproc;
 
+#[derive(Clone)]
+struct Code {
+    instr_arr: Vec<Token>,
+    instr_ptr: usize
+}
+
 pub struct Interpreter {
-    cells: Vec<u32>,
+    cells: Vec<u8>,
     cell_ptr: usize,
-    code: Vec<Token>,
-    code_ptr: usize,
+    root_code: Code,
     stdout: Stdout,
     auto_flush_stdout: bool,
     stdin: Stdin,
-    stdin_buffer: Vec<u32>,
+    stdin_buffer: Vec<u8>,
+    executed_instr_count_buf: u64,
+    pub executed_instr_count: Arc<AtomicU64>,
 }
 
+
+impl Code {
+    fn get_current_instr(&mut self) -> &Token { &self.instr_arr[self.instr_ptr] }
+}
 
 impl Interpreter {
     pub fn new(
         code: Vec<Token>,
         cell_array_size: usize,
         auto_flush_stdout: bool
-
     ) -> Self {
         Interpreter {
             cells: vec![0; cell_array_size],
             cell_ptr: cell_array_size / 2,
-            code,
-            code_ptr: 0,
-            stdout: stdout(),
-            stdin: stdin(),
-            stdin_buffer: Vec::new(),
-            auto_flush_stdout
+            root_code: Code {
+                instr_arr: code,
+                instr_ptr: 0
+            },
+            auto_flush_stdout,
+            ..Default::default()
         }
     }
 
-    fn get_current_instr(&mut self) -> &Token { &self.code[self.code_ptr] }
 
-    fn get_cell_value(&mut self) -> u32 { self.cells[self.cell_ptr] }
+    fn get_cell_value(&mut self) -> u8 { self.cells[self.cell_ptr] }
 
-    fn set_cell_value(&mut self, value: u32) { self.cells[self.cell_ptr] = value; }
+    fn set_cell_value(&mut self, value: u8) { self.cells[self.cell_ptr] = value; }
 
     fn inc_cell_ptr(&mut self) { self.cell_ptr += 1; }
 
@@ -58,7 +71,7 @@ impl Interpreter {
 
     fn put_char(&mut self) {
         let chr = self.get_cell_value();
-        self.stdout.write(&[chr as u8; 1]).unwrap();
+        self.stdout.write(&[chr; 1]).unwrap();
         if self.auto_flush_stdout {
             self.stdout.flush();
         }
@@ -70,33 +83,15 @@ impl Interpreter {
             self.stdin.read_line(&mut line).unwrap();
             line.chars()
                 .filter(|c| c.is_ascii())
-                .for_each(|c| self.stdin_buffer.push(c as u32))
+                .for_each(|c| self.stdin_buffer.push(c as u8))
         }
         let buffered_value = self.stdin_buffer.pop().unwrap();
         self.set_cell_value(buffered_value);
     }
 
-    fn loop_start(&mut self) {
-        if self.get_cell_value() == 0 {
-            while self.get_current_instr() != &LoopEnd {
-                self.code_ptr += 1;
-            }
-        }
-    }
-
-    fn loop_end(&mut self) {
-        if self.get_cell_value() != 0 {
-            while self.get_current_instr() != &LoopStart {
-                self.code_ptr -= 1;
-            }
-        }
-    }
-
-    pub fn main_loop(&mut self) {
-        let mut time = SystemTime::now();
-        let mut instr_count: u64 = 0;
-        while self.code_ptr < self.code.len() {
-            let instr = self.get_current_instr();
+    fn process(&mut self, code: &mut Code) {
+        while code.instr_ptr < code.instr_arr.len() {
+            let instr = code.get_current_instr();
             match instr {
                 MoveFwd => self.inc_cell_ptr(),
                 MoveBack => self.dec_cell_ptr(),
@@ -104,18 +99,61 @@ impl Interpreter {
                 Dec => self.dec_curr_cell(),
                 PutCh => self.put_char(),
                 GetCh => self.get_char(),
-                LoopStart => self.loop_start(),
-                LoopEnd => self.loop_end(),
+                Loop(inner_instr) => {
+                    let mut inner_code = Code {
+                        instr_arr: inner_instr.clone(),
+                        instr_ptr: 0
+                    };
+                    self.process(&mut inner_code)
+                },
+                LoopL => {
+                    if self.get_cell_value() == 0 {
+                        code.instr_ptr = code.instr_arr.len();
+                    }
+                }
+                LoopR => {
+                    if self.get_cell_value() != 0 {
+                        code.instr_ptr = 0;
+                    }
+                }
             }
-            self.code_ptr += 1;
-
-            instr_count += 1;
-            if SystemTime::now().duration_since(time).unwrap().as_secs() > 1 {
-                println!("Instructions per second: {}", instr_count);
-                instr_count = 0;
-                time = SystemTime::now();
-            }
+            self.inc_executed_instr_count();
+            code.instr_ptr += 1;
         }
+    }
+
+    fn inc_executed_instr_count(&mut self) {
+        if self.executed_instr_count_buf > 100000 {
+            self.executed_instr_count.fetch_add(self.executed_instr_count_buf + 1, Ordering::SeqCst);
+            self.executed_instr_count_buf = 0;
+        } else {
+            self.executed_instr_count_buf += 1;
+        }
+
+    }
+
+    pub fn main_loop(&mut self) {
+        let mut root_code = self.root_code.clone();
+        self.process(&mut root_code);
     }
 }
 
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self {
+            cells: Vec::new(),
+            cell_ptr: 0,
+            root_code: Code {
+                instr_arr: Vec::new(),
+                instr_ptr: 0,
+            },
+            stdout: stdout(),
+            auto_flush_stdout: false,
+            stdin: stdin(),
+            stdin_buffer: Vec::new(),
+            executed_instr_count_buf: 0,
+            executed_instr_count: Arc::new(AtomicU64::new(0)),
+        }
+    }
+}

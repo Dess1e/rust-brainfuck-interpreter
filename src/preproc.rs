@@ -1,7 +1,6 @@
 use Token::*;
 
-#[derive(PartialEq)]
-#[derive(Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Token {
     MoveFwd,
     MoveBack,
@@ -9,8 +8,9 @@ pub enum Token {
     Dec,
     PutCh,
     GetCh,
-    LoopStart,
-    LoopEnd
+    LoopL,
+    LoopR,
+    Loop(Vec<Token>),
 }
 
 fn syntax_check_parse_punctuation(code: &String) -> String {
@@ -47,22 +47,53 @@ fn syntax_check(code: &String) -> String {
     parsed_code
 }
 
-fn tokenize(parsed_code: &String) -> Vec<Token> {
-    let mut res = Vec::new();
-    for chr in parsed_code.chars() {
-        let instr = match chr {
-            '>' => MoveFwd,
-            '<' => MoveBack,
-            '+' => Inc,
-            '-' => Dec,
-            '.' => PutCh,
-            ',' => GetCh,
-            '[' => LoopStart,
-            ']' => LoopEnd,
-            _ => panic!("Couldn't tokenize instruction {}. Syntax checker error?", chr)
-        };
-        res.push(instr);
+fn try_push_token_to_loop_stack(
+    token: Token,
+    loop_stack: &mut Vec<Token>,
+    result_vec: &mut Vec<Token>
+) {
+    if loop_stack.len() > 0 {
+        let last_loop = loop_stack.last_mut().unwrap();
+        if let Loop(inner) = last_loop {
+            inner.push(token);
+        } else {
+            panic!("Fatal error: wrong token in loop stack.");
+        }
+    } else {
+        result_vec.push(token);
     }
+}
+
+
+fn tokenize(parsed_code: &String) -> Vec<Token> {
+    let mut res: Vec<Token> = Vec::new();
+    let mut loop_stack: Vec<Token> = Vec::new();
+    for chr in parsed_code.chars() {
+        match chr {
+            '[' => {
+                let loop_ = Loop(vec![LoopL]);
+                loop_stack.push(loop_);
+            },
+            ']' => {
+                try_push_token_to_loop_stack(LoopR, &mut loop_stack, &mut res);
+                let last_loop = loop_stack.pop().unwrap();
+                try_push_token_to_loop_stack(last_loop, &mut loop_stack, &mut res);
+            },
+            _ => {
+                let instr = match chr {
+                    '>' => MoveFwd,
+                    '<' => MoveBack,
+                    '+' => Inc,
+                    '-' => Dec,
+                    '.' => PutCh,
+                    ',' => GetCh,
+                    _ => panic!("Couldn't tokenize instruction {}. Syntax checker error?", chr)
+                };
+                try_push_token_to_loop_stack(instr, &mut loop_stack, &mut res);
+            }
+        }
+    }
+    println!("{:?}", res);
     res
 }
 
