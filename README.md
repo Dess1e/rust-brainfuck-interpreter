@@ -1,5 +1,5 @@
-#Brainfuck interpreter
-Simple brainfuck interpreter with some optimizations.
+# Brainfuck interpreter  
+Simple brainfuck interpreter written using Rustlang. Kinda optimized.
 Runs with decent speed.
 
 ```
