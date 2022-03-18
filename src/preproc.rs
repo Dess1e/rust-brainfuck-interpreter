@@ -1,11 +1,12 @@
 use Token::*;
+use crate::util::variant_eq;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Token {
-    MoveFwd,
-    MoveBack,
-    Inc,
-    Dec,
+    MoveFwd(u64),
+    MoveBack(u64),
+    Inc(u64),
+    Dec(u64),
     PutCh,
     GetCh,
     LoopL,
@@ -55,15 +56,57 @@ fn try_push_token_to_loop_stack(
     if loop_stack.len() > 0 {
         let last_loop = loop_stack.last_mut().unwrap();
         if let Loop(inner) = last_loop {
-            inner.push(token);
+            try_pack_simple_token(token, inner);
         } else {
             panic!("Fatal error: wrong token in loop stack.");
         }
     } else {
-        result_vec.push(token);
+        try_pack_simple_token(token, result_vec);
     }
 }
 
+fn try_pack_simple_token(token: Token, instr_arr: &mut Vec<Token>) {
+    let token = token;
+    let arr_token = match instr_arr.last() {
+        Some(val) => val,
+        None => {
+            instr_arr.push(token);
+            return;
+        }
+    };
+    if !variant_eq(&token, arr_token) {
+        instr_arr.push(token);
+        return;
+    }
+    let new_token = match token {
+        MoveFwd(n) => {
+            if let MoveFwd(n2) = arr_token {
+                MoveFwd(n + n2)
+            } else { panic!() }
+        },
+        MoveBack(n) => {
+            if let MoveBack(n2) = arr_token {
+                MoveBack(n + n2)
+            } else { panic!() }
+        },
+        Inc(n) => {
+            if let Inc(n2) = arr_token {
+                Inc(n + n2)
+            } else { panic!() }
+        },
+        Dec(n) => {
+            if let Dec(n2) = arr_token {
+                Dec(n + n2)
+            } else { panic!() }
+        }
+        _ => {
+            instr_arr.push(token);
+            return;
+        }
+    };
+    instr_arr.pop().unwrap();
+    instr_arr.push(new_token);
+}
 
 fn tokenize(parsed_code: &String) -> Vec<Token> {
     let mut res: Vec<Token> = Vec::new();
@@ -81,10 +124,10 @@ fn tokenize(parsed_code: &String) -> Vec<Token> {
             },
             _ => {
                 let instr = match chr {
-                    '>' => MoveFwd,
-                    '<' => MoveBack,
-                    '+' => Inc,
-                    '-' => Dec,
+                    '>' => MoveFwd(1),
+                    '<' => MoveBack(1),
+                    '+' => Inc(1),
+                    '-' => Dec(1),
                     '.' => PutCh,
                     ',' => GetCh,
                     _ => panic!("Couldn't tokenize instruction {}. Syntax checker error?", chr)
@@ -93,7 +136,6 @@ fn tokenize(parsed_code: &String) -> Vec<Token> {
             }
         }
     }
-    println!("{:?}", res);
     res
 }
 

@@ -1,9 +1,6 @@
-use std::borrow::BorrowMut;
 use std::io::{stdin, Stdin, stdout, Stdout, Write};
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
 
 use preproc::Token;
 use Token::*;
@@ -55,17 +52,17 @@ impl Interpreter {
 
     fn set_cell_value(&mut self, value: u8) { self.cells[self.cell_ptr] = value; }
 
-    fn inc_cell_ptr(&mut self) { self.cell_ptr += 1; }
+    fn inc_cell_ptr(&mut self, value: usize) { self.cell_ptr += value; }
 
-    fn dec_cell_ptr(&mut self) { self.cell_ptr -= 1; }
+    fn dec_cell_ptr(&mut self, value: usize) { self.cell_ptr -= value; }
 
-    fn inc_curr_cell(&mut self) {
-        let new_val = self.get_cell_value().wrapping_add(1);
+    fn inc_curr_cell(&mut self, value: u8) {
+        let new_val = self.get_cell_value().wrapping_add(value);
         self.set_cell_value(new_val);
     }
 
-    fn dec_curr_cell(&mut self) {
-        let new_val = self.get_cell_value().wrapping_sub(1);
+    fn dec_curr_cell(&mut self, value: u8) {
+        let new_val = self.get_cell_value().wrapping_sub(value);
         self.set_cell_value(new_val);
     }
 
@@ -73,7 +70,7 @@ impl Interpreter {
         let chr = self.get_cell_value();
         self.stdout.write(&[chr; 1]).unwrap();
         if self.auto_flush_stdout {
-            self.stdout.flush();
+            self.stdout.flush().unwrap();
         }
     }
 
@@ -93,10 +90,10 @@ impl Interpreter {
         while code.instr_ptr < code.instr_arr.len() {
             let instr = code.get_current_instr();
             match instr {
-                MoveFwd => self.inc_cell_ptr(),
-                MoveBack => self.dec_cell_ptr(),
-                Inc => self.inc_curr_cell(),
-                Dec => self.dec_curr_cell(),
+                MoveFwd(n) => self.inc_cell_ptr(*n as usize),
+                MoveBack(n) => self.dec_cell_ptr(*n as usize),
+                Inc(n) => self.inc_curr_cell(*n as u8),
+                Dec(n) => self.dec_curr_cell(*n as u8),
                 PutCh => self.put_char(),
                 GetCh => self.get_char(),
                 Loop(inner_instr) => {
